@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Midtrans Sandbox Test</title>
+  <script
+    src="https://app.sandbox.midtrans.com/snap/snap.js"
+    data-client-key="Mid-client-9P6tiOZ74dvBfmax">
+  </script>
+</head>
+<body>
+
+<button id="pay">Bayar Sekarang</button>
+
+<script>
+  const SNAP_TOKEN = "854fee41-0d81-475f-9a90-1d73e1c64f32"; // DARI API CREATE PAYMENT
+
+  document.getElementById('pay').onclick = function () {
+    window.snap.pay(SNAP_TOKEN, {
+      onSuccess: function(result){
+        console.log('SUCCESS', result);
+        alert('Pembayaran berhasil');
+      },
+      onPending: function(result){
+        console.log('PENDING', result);
+        alert('Menunggu pembayaran');
+      },
+      onError: function(result){
+        console.log('ERROR', result);
+        alert('Pembayaran gagal');
+      },
+      onClose: function(){
+        alert('Popup ditutup');
+      }
+    });
+  }
+</script>
+
+</body>
+</html>

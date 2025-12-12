@@ -18,22 +18,19 @@ const allowedOrigins = (process.env.CORS_ORIGIN || '')
 
 app.use(cors({
   origin: (origin, callback) => {
-    // allow server-to-server, Postman, webhook
+    // allow webhook & server-to-server
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // 🔴 PENTING: biar gampang debug
-    return callback(
-      new Error(`CORS blocked: ${origin} not allowed`)
-    );
+    // ❗ JANGAN throw error
+    return callback(null, false);
   },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  credentials: true
 }));
+
 
 // ⚠️ handle preflight explicitly
 app.options('*', cors());
@@ -61,6 +58,7 @@ const webhookRoutes = require('./routes/webhook.routes');
 const protectedRoutes = require('./routes/protected.routes');
 const sessionRoutes = require('./routes/session.routes');
 const tablesRoutes = require('./tables/tables.routes');
+
 
 // API Prefix (default: /api)
 const apiPrefix = process.env.API_PREFIX || '/api';

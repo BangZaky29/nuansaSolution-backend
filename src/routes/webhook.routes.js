@@ -1,10 +1,7 @@
-// backend/src/routes/webhook.routes.js
 const express = require('express');
 const router = express.Router();
-const webhookController = require('../controllers/webhook.controller');
+const controller = require('../controllers/webhook.controller');
 
-// Webhook dari Midtrans (no auth needed)
-router.post('/midtrans', webhookController.handleMidtransNotification);
-router.get('/test', webhookController.testWebhook);
+router.post('/midtrans', controller.midtransWebhook);
 
 module.exports = router;
