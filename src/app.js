@@ -9,46 +9,74 @@ require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 const app = express();
 
 // ============================================
-// MIDDLEWARE
+// ENV
+// ============================================
+const PORT = process.env.PORT || 5000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+const API_PREFIX = process.env.API_PREFIX || '/api';
+
+// ============================================
+// HELMET (SAFE FOR API & MIDTRANS WEBHOOK)
+// ============================================
+app.use(
+  helmet({
+    crossOriginResourcePolicy: false,
+  })
+);
+
+// ============================================
+// CORS CONFIGURATION (PRODUCTION SAFE)
 // ============================================
 const allowedOrigins = (process.env.CORS_ORIGIN || '')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
 
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
-    // allow server-to-server, Postman, webhook
+    // Allow Postman, server-to-server, Midtrans webhook
     if (!origin) return callback(null, true);
 
     if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
 
-    // 🔴 PENTING: biar gampang debug
-    return callback(
-      new Error(`CORS blocked: ${origin} not allowed`)
-    );
+    if (NODE_ENV === 'development') {
+      console.warn('❌ CORS blocked:', origin);
+    }
+
+    // IMPORTANT: do NOT throw error
+    return callback(null, false);
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
-// ⚠️ handle preflight explicitly
-app.options('*', cors());
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
-
-
-
+// ============================================
+// BODY PARSER
+// ============================================
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-morgan.token('result', (req, res) => (res.statusCode < 400 ? 'success' : 'error'));
-morgan.token('user', (req) => (req.user?.user_id ? String(req.user.user_id) : '-'));
+
+// ============================================
+// LOGGER (MORGAN)
+// ============================================
+morgan.token('result', (req, res) =>
+  res.statusCode < 400 ? 'success' : 'error'
+);
+morgan.token('user', (req) =>
+  req.user?.user_id ? String(req.user.user_id) : '-'
+);
+
 const logFormat =
   process.env.LOG_LEVEL === 'debug'
     ? ':result :method :url :status :response-time ms :res[content-length] user=:user ip=:remote-addr time=:date[iso]'
     : process.env.LOG_LEVEL || 'dev';
+
 app.use(morgan(logFormat));
 
 // ============================================
@@ -60,69 +88,74 @@ const paymentRoutes = require('./routes/payment.routes');
 const webhookRoutes = require('./routes/webhook.routes');
 const protectedRoutes = require('./routes/protected.routes');
 const sessionRoutes = require('./routes/session.routes');
+const tablesRoutes = require('./tables/tables.routes');
 
-// API Prefix (default: /api)
-const apiPrefix = process.env.API_PREFIX || '/api';
+app.use(`${API_PREFIX}/auth`, authRoutes);
+app.use(`${API_PREFIX}/user`, userRoutes);
+app.use(`${API_PREFIX}/payment`, paymentRoutes);
+app.use(`${API_PREFIX}/webhook`, webhookRoutes);
+app.use(`${API_PREFIX}/protected`, protectedRoutes);
+app.use(`${API_PREFIX}/session`, sessionRoutes);
+app.use(`${API_PREFIX}/tables`, tablesRoutes);
 
-app.use(`${apiPrefix}/auth`, authRoutes);
-app.use(`${apiPrefix}/user`, userRoutes);
-app.use(`${apiPrefix}/payment`, paymentRoutes);
-app.use(`${apiPrefix}/webhook`, webhookRoutes);
-app.use(`${apiPrefix}/protected`, protectedRoutes);
-app.use(`${apiPrefix}/session`, sessionRoutes);
-
-// Health check
-app.get(`${apiPrefix}/health`, (req, res) => {
+// ============================================
+// HEALTH CHECK
+// ============================================
+app.get(`${API_PREFIX}/health`, (req, res) => {
   res.json({
     success: true,
     message: 'API is running',
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV || 'development',
-    port: process.env.PORT || 5000
+    environment: NODE_ENV,
+    port: PORT,
   });
 });
 
-// Root endpoint
+// ============================================
+// ROOT
+// ============================================
 app.get('/', (req, res) => {
   res.json({
     success: true,
     message: 'Nuansa Legal - Payment Gateway API',
     version: '1.0.0',
     endpoints: {
-      health: `${apiPrefix}/health`,
-      auth: `${apiPrefix}/auth`,
-      user: `${apiPrefix}/user`,
-      payment: `${apiPrefix}/payment`,
-      webhook: `${apiPrefix}/webhook`,
-      protected: `${apiPrefix}/protected`
-    }
+      health: `${API_PREFIX}/health`,
+      auth: `${API_PREFIX}/auth`,
+      user: `${API_PREFIX}/user`,
+      payment: `${API_PREFIX}/payment`,
+      webhook: `${API_PREFIX}/webhook`,
+      protected: `${API_PREFIX}/protected`,
+    },
   });
 });
 
-// 404 handler
+// ============================================
+// 404 HANDLER
+// ============================================
 app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
-    requested_url: req.originalUrl
+    requested_url: req.originalUrl,
   });
 });
 
-// Error handler
+// ============================================
+// ERROR HANDLER
+// ============================================
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
+  console.error('🔥 Error:', err);
   res.status(err.status || 500).json({
     success: false,
     message: err.message || 'Internal server error',
-    ...(process.env.NODE_ENV === 'development' && { stack: err.stack })
+    ...(NODE_ENV === 'development' && { stack: err.stack }),
   });
 });
 
 // ============================================
 // START SERVER
 // ============================================
-const PORT = process.env.PORT || 5000;
-
 app.listen(PORT, () => {
   console.log(`
 ╔════════════════════════════════════════════════════════╗
@@ -130,24 +163,27 @@ app.listen(PORT, () => {
 ║   🚀 Nuansa Legal - Payment Gateway                   ║
 ║                                                        ║
 ║   📡 Server: http://localhost:${PORT}                    ║
-║   🌍 Environment: ${process.env.NODE_ENV || 'development'}                         ║
-║   💾 Database: ${process.env.DB_NAME || 'gateway'}@${process.env.DB_HOST || 'localhost'}               ║
+║   🌍 Environment: ${NODE_ENV.padEnd(28)}║
+║   💾 Database: ${(process.env.DB_NAME || 'gateway').padEnd(30)}║
 ║                                                        ║
-║   ✅ 1 User = 1 Paket Aktif System                    ║
 ║   🔐 JWT Authentication Enabled                       ║
 ║   💳 Midtrans Integration Active                      ║
 ║                                                        ║
-║   📚 API Docs: http://localhost:${PORT}/api              ║
-║   ❤️  Health Check: http://localhost:${PORT}/api/health   ║
+║   ❤️  Health Check: /api/health                        ║
 ║                                                        ║
 ╚════════════════════════════════════════════════════════╝
   `);
 
-  // Log important configs
   console.log('📋 Configuration:');
-  console.log(`   - Database: ${process.env.DB_NAME}`);
-  console.log(`   - Midtrans: ${process.env.MIDTRANS_IS_PRODUCTION === 'true' ? 'PRODUCTION' : 'SANDBOX'}`);
-  console.log(`   - CORS: ${process.env.CORS_ORIGIN || 'http://localhost:5173'}`);
+  console.log(`   - DB: ${process.env.DB_NAME}@${process.env.DB_HOST}`);
+  console.log(
+    `   - Midtrans: ${
+      process.env.MIDTRANS_IS_PRODUCTION === 'true'
+        ? 'PRODUCTION'
+        : 'SANDBOX'
+    }`
+  );
+  console.log(`   - CORS: ${allowedOrigins.join(', ') || 'ALL'}`);
   console.log('');
 });
 
