@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 
@@ -15,29 +16,39 @@ const app = express();
 // Parse allowed origins from environment
 const allowedOrigins = (process.env.CORS_ORIGIN || 'http://localhost:5173')
   .split(',')
-  .map(o => o.trim())
+  .map(o => o.trim().replace(/\/$/, '')) // Remove trailing slash
   .filter(Boolean);
 
 // CORS Configuration
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     // Allow webhook & server-to-server requests (no origin header)
-    if (!origin) return callback(null, true);
+    if (!origin) {
+      return callback(null, true);
+    }
+
+    // Normalize origin (remove trailing slash)
+    const normalizedOrigin = origin.replace(/\/$/, '');
 
     // Check if origin is in allowed list
-    if (allowedOrigins.includes(origin)) {
+    if (allowedOrigins.includes(normalizedOrigin)) {
       return callback(null, true);
     }
 
     // Reject but don't throw error
-    console.warn(`⚠️ CORS blocked origin: ${origin}`);
+    console.warn(`⚠️ CORS blocked origin: ${origin} (allowed: ${allowedOrigins.join(', ')})`);
     return callback(null, false);
   },
-  credentials: true
-}));
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Length', 'X-Request-Id']
+};
+
+app.use(cors(corsOptions));
 
 // Handle preflight requests explicitly
-app.options('*', cors());
+app.options('*', cors(corsOptions));
 
 // Body parsing middleware
 app.use(express.json());
@@ -69,18 +80,25 @@ const webhookRoutes = require('./routes/webhook.routes');
 const protectedRoutes = require('./routes/protected.routes');
 const sessionRoutes = require('./routes/session.routes');
 const tablesRoutes = require('./tables/tables.routes');
+const featureRoutes = require('./routes/feature.routes');
+const notificationRoutes = require('./routes/notification.routes');
 
 // API Prefix (default: /api)
 const apiPrefix = process.env.API_PREFIX || '/api';
 
 // Mount routes
-app.use(`${apiPrefix}/auth`, authRoutes);
+const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100 });
+const paymentLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 50 });
+
+app.use(`${apiPrefix}/auth`, authLimiter, authRoutes);
 app.use(`${apiPrefix}/user`, userRoutes);
-app.use(`${apiPrefix}/payment`, paymentRoutes);
+app.use(`${apiPrefix}/payment`, paymentLimiter, paymentRoutes);
 app.use(`${apiPrefix}/webhook`, webhookRoutes);
 app.use(`${apiPrefix}/protected`, protectedRoutes);
 app.use(`${apiPrefix}/session`, sessionRoutes);
 app.use(`${apiPrefix}/tables`, tablesRoutes);
+app.use(`${apiPrefix}/features`, featureRoutes);
+app.use(`${apiPrefix}/notifications`, notificationRoutes);
 
 // ============================================
 // HEALTH & INFO ENDPOINTS
@@ -193,8 +211,16 @@ app.listen(PORT, HOST, () => {
   console.log(`   - POST   ${apiPrefix}/auth/register`);
   console.log(`   - POST   ${apiPrefix}/auth/login`);
   console.log(`   - POST   ${apiPrefix}/payment/create`);
+  console.log(`   - POST   ${apiPrefix}/payment/resume/:order_id`);
+  console.log(`   - POST   ${apiPrefix}/payment/cancel/:order_id`);
+  console.log(`   - GET    ${apiPrefix}/payment/status/:order_id`);
   console.log(`   - POST   ${apiPrefix}/webhook/midtrans`);
   console.log(`   - GET    ${apiPrefix}/webhook/verify/:orderId`);
+  console.log(`   - GET    ${apiPrefix}/features/all`);
+  console.log(`   - GET    ${apiPrefix}/features/my-subscription`);
+  console.log(`   - GET    ${apiPrefix}/features/usage-history`);
+  console.log(`   - POST   ${apiPrefix}/features/check-access`);
+  console.log(`   - GET    ${apiPrefix}/notifications`);
   console.log(`   - GET    ${apiPrefix}/health`);
   console.log('');
   console.log('✅ Server is ready to accept connections!');

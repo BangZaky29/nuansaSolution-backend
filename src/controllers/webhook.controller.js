@@ -2,6 +2,8 @@
 
 const crypto = require('crypto');
 const db = require('../config/db');
+const featureService = require('../services/feature.service');
+const notificationService = require('../services/notification.service');
 
 /**
  * Verify Midtrans notification signature
@@ -141,8 +143,17 @@ exports.handleMidtransNotification = async (req, res) => {
 
       console.log(`✅ Expiry date set for order ${order_id} until ${expiryDate}`);
 
-      // TODO: Send email notification to user
-      // await emailService.sendPaymentSuccess(order);
+      try {
+        const subscription = await featureService.createSubscription(order.user_id, order_id);
+        await notificationService.sendPaymentSuccess(order.user_id, {
+          order_id,
+          package_name: order.package_name,
+          amount: Number(order.gross_amount),
+          subscription
+        });
+      } catch (subErr) {
+        console.error('Subscription/notification error:', subErr);
+      }
     }
 
     // Send success response
